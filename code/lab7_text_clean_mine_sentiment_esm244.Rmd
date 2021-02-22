@@ -1,9 +1,11 @@
 ---
-title: 'ESM 244 Lab 7 Part 2: Text Cleaning, Mining, and Sentiment Analysis'
+title: 'ESM 244 Lab 7 Parts 2-3: Text Cleaning, Mining, and Sentiment Analysis'
 author: "Carlos Simms"
 date: "2/21/2021"
 output: html_document
 ---
+
+# PART 2: Text Cleaning and Mining
 
 ### Attaching packages
 
@@ -14,27 +16,153 @@ knitr::opts_chunk$set(echo = TRUE,
 library(tidyverse) # Default.
 library(tidytext)
 library(textdata)
-# library(pdftools) ERROR
+library(pdftools) # To read in and customize pdf documents. NOTE: This package does not work on R Bren Server V3.6...
 library(ggwordcloud)
+library(here)
 ```
 
-### insert
+### Reading in the Hobbit text pdf
+
+```{r, cache = TRUE}
+hobbit_text <- pdf_text(here("text", 
+                             "the-hobbit.pdf")) # NOTE: To read in a pdf text document in R Cloud V4.0.3, you must first place it in a different folder within the .Rproj file.
+
+hobbit_text_p34 <- hobbit_text[34]
+hobbit_text_p34
+```
+
+### Converting the text into a tidy data frame
 
 ```{r}
-hobbit_text <- pdf_text("the-hobbit.pdf")
+hobbit_tidy <- data.frame(hobbit_text) %>% 
+  mutate(text_full = str_split(hobbit_text, 
+                               pattern = "\\n")) %>% # To tell R that anything with a "\n" (denoting new lines and/or indentations) that it should read them as so without "\n".
+  unnest(text_full) %>% # To remove the "c()" vectoring.
+  mutate(text_full = str_trim(text_full)) 
 ```
 
+### Wrangling and converting the text into a tidy text format
 
+```{r}
+hobbit_df <- hobbit_tidy %>% 
+  slice(-(1:125)) %>% 
+  mutate(chapter = case_when(str_detect(text_full, 
+                                        pattern = "Chapter") ~ text_full, 
+                             TRUE ~ NA_character_)) %>% # To convert the "NA" values to a character class instead of a logical class.
+  fill(chapter) %>% # To fill all "NA" values in the "chapter" column to the appropriate chapter value.
+  separate(col = chapter, 
+           into = c("ch", 
+                    "no"), 
+           sep = " ") %>% # Because the Hobbit text chapters are in Roman numerals, they must be separated to be read independently.
+  mutate(chapter = as.numeric(as.roman(no))) # To mutate and read the character Roman numerals as numeric Roman numerals.
+```
 
+### Tokens
 
+```{r}
+hobbit_tokens <- hobbit_df %>% 
+  tidytext::unnest_tokens(word, 
+                          text_full) %>% 
+  dplyr::select(-hobbit_text) # At this point, adding in a lot of packages may conflict with 'dplyr' - this may only be an issue in the R Bren Server V3.6...
 
+hobbit_wordcount <- hobbit_tokens %>% 
+  count(chapter, 
+        word)
 
+hobbit_wordcount
+```
 
+### Removing all 'stop_words' that exist in 'hobbit_tokens'
 
+```{r}
+hobbit_nonstop_words <- hobbit_tokens %>% 
+  anti_join(stop_words) # To indicate what words you do not want to keep in the text data frame.
 
+nonstop_counts <- hobbit_nonstop_words %>% 
+  count(chapter, 
+        word)
 
+nonstop_counts
+```
 
+### Searching for the top five words in each chapter
 
+```{r}
+top_5_words <- nonstop_counts %>% 
+  group_by(chapter) %>% 
+  arrange(-n) %>% 
+  slice(1:5)
 
+ggplot(data = top_5_words, 
+       aes(x = word, 
+           y = n)) + 
+  geom_col(fill = "blue") + 
+  facet_wrap(~chapter, 
+             scales = "free") + 
+  coord_flip()
+```
 
+### Creating a word cloud
 
+```{r}
+ch1_top100 <- nonstop_counts %>% 
+  filter(chapter == 1) %>% 
+  arrange(-n) %>% 
+  slice(1:100)
+
+ch1_cloud <- ggplot(data = ch1_top100, 
+                    aes(label = word)) + 
+  geom_text_wordcloud(aes(color = n, 
+                          size = n)) + 
+  scale_size_area(max_size = 6)
+
+ch1_cloud
+```
+
+# PART 3: Sentiment Analysis
+
+### Using "afinn" lexicon - ranking on a scale from negative to positive five
+
+```{r}
+afinn_pos <- get_sentiments("afinn") %>% 
+  filter(value > 2)
+
+hobbit_afinn <- hobbit_nonstop_words %>% 
+  inner_join(get_sentiments("afinn"))
+
+afinn_counts <- hobbit_afinn %>% 
+  count(chapter, 
+        value)
+
+afinn_means <- hobbit_afinn %>% 
+  group_by(chapter) %>% 
+  summarize(mean_afinn = mean(value))
+
+ggplot(data = afinn_means, 
+       aes(x = chapter, 
+           y = mean_afinn)) + 
+  geom_col() + 
+  coord_flip()
+
+# This gives us a method to assess the sentiments/emotions based on the positivity and negativtiy of the Hobbit text.
+```
+
+### Using "NRC" lexicon
+
+```{r}
+hobbit_nrc <- hobbit_nonstop_words %>% 
+  inner_join(get_sentiments("nrc"))
+
+hobbit_nrc_counts <- hobbit_nrc %>% 
+  count(chapter, 
+        sentiment)
+
+ggplot(data = hobbit_nrc_counts, 
+       aes(x = sentiment, 
+           y = n)) + 
+  geom_col() + 
+  facet_wrap(~chapter) + 
+  coord_flip()
+```
+
+END
